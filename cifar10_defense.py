@@ -16,6 +16,7 @@ from torch.autograd import Variable
 from learning.wideresnet import WideResNet, WideResNetBD, WideResNetMed_SSL, WRN34_out_branch
 from learning.preactresnet import PreActResNet18Mhead, Res18_out3_model, Res18_out4_model, Res18_out5_model,Res18_out6_model
 from utils import *
+import time
 
 mu = torch.tensor(cifar10_mean).view(3,1,1).cuda()
 std = torch.tensor(cifar10_std).view(3,1,1).cuda()
@@ -472,11 +473,11 @@ def get_args():
     import socket
     # if 'cv10' in socket.gethostname():
     #     parser.add_argument('--save_root_path', default='/local/vondrick/chengzhi/SSRobust', type=str)
-    if 'cv' in socket.gethostname():
-        parser.add_argument('--save_root_path', default='/proj/vondrick/mcz/SSRobust/Ours', type=str)
-    else:
-        parser.add_argument('--save_root_path', default='/local/rcs/mcz/2021Spring/SSRobdata/', type=str)
-
+    # if 'cv' in socket.gethostname():
+    #     parser.add_argument('--save_root_path', default='/proj/vondrick/mcz/SSRobust/Ours', type=str)
+    # else:
+    #     parser.add_argument('--save_root_path', default='/local/rcs/mcz/2021Spring/SSRobdata/', type=str)
+    parser.add_argument('--save_root_path', default='/home/bowenc/dev/SelfSupDefense/save_models/', type=str)
     parser.add_argument('--ssl_model_path', default='', type=str)
     parser.add_argument('--attack_type', default='', type=str)
     parser.add_argument('--seed', default=0, type=int)
@@ -541,10 +542,12 @@ def main():
 
     train_set = list(zip(transpose(pad(dataset['train']['data'], 4) / 255.),
                          dataset['train']['labels']))
+    train_set = train_set[:2*args.batch_size]
     train_set_x = Transform(train_set, transforms)
     train_batches = Batches(train_set_x, args.batch_size, shuffle=True, set_random_choices=True, num_workers=2)
 
     test_set = list(zip(transpose(dataset['test']['data'] / 255.), dataset['test']['labels']))
+    test_set = test_set[:2*args.batch_size]
     test_batches = Batches(test_set, args.batch_size, shuffle=False, num_workers=2)
 
     epsilon = (args.epsilon / 255.)
@@ -653,7 +656,8 @@ def main():
     # Train the SSL model first
     if not args.eval_only:
         flag=True
-        for epoch in range(0, 201):
+        timing_flag=True
+        for epoch in range(0, args.epochs):
             model.eval()
             c_head_model.train()
 
@@ -662,6 +666,7 @@ def main():
 
             train_n=0
             for i, batch in enumerate(train_batches):
+                batch_start_time = time.time()
                 X, y = batch['input'], batch['target']
 
                 contrastive_Loss = \
@@ -676,6 +681,9 @@ def main():
 
                 if args.debug:
                     break
+                if timing_flag:
+                    timing_flag=False
+                    print("Time for one batch:", time.time()-start_time)
 
             logger.info('train loss:  %.4f   ', train_loss / train_n)
             # if epoch<20:
@@ -750,7 +758,7 @@ def main():
                 contrastive_clean_loss = 0
                 adaadv_contrastive_loss=0
 
-                bs=512
+                bs=args.batch_size
                 num_bs=TestX.size(0)//bs
                 if num_bs*bs < TestX.size(0):
                     num_bs+=1
@@ -829,10 +837,11 @@ def main():
                     (epoch,
                      (test_loss / test_n), (test_acc / test_n * 100), (test_clean_ada_acc / test_n * 100),
                      (test_robust_loss / test_n), (test_robust_acc / test_n * 100),
-                     (test_robust_loss / test_n), (test_robust_ada_acc / test_n * 100)))
+                     (test_robust_ada_loss / test_n), (test_robust_ada_acc / test_n * 100)))
                 print('clean contrastive=%.6f \t adv contrastive=%.6f \t adaadv contrastive=%.6f' %
                       ((contrastive_clean_loss / test_n), (contrastive_attack_loss / test_n), (adaadv_contrastive_loss / test_n)))
-
+                epoch_end_time = time.time()
+                print("total time for an epoch: ", start_time-epoch_end_time)
     else:
         # SSL model has been trained, here we do the evaluation only without training.
 
